@@ -37,12 +37,21 @@ function compressAndConvertToJpg($source, $destination, $quality = 80) {
     return imagejpeg($image, $destination, $quality);
 }
 
+// 在文件开头附近添加
+function getSafeFileName($id) {
+    return preg_replace('/[^a-zA-Z0-9]/', '', $id) . '.txt';
+}
+
 // 处理保存请求
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['content'])) {
+    header('Content-Type: application/json');
+    
+    if (isset($_POST['content']) && isset($_POST['noteId'])) {
         // 保存内容
+        $noteId = $_POST['noteId'];
         $content = $_POST['content'];
-        file_put_contents('updata/notes.txt', $content);
+        $filename = 'updata/' . getSafeFileName($noteId);
+        file_put_contents($filename, $content);
         echo json_encode(['success' => true]);
         exit;
     } elseif (isset($_POST['image'])) {
@@ -143,11 +152,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// 读取保存的内容
+// 修改读取内容的部分
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['note'])) {
+    $noteId = $_GET['note'];
+    $filename = 'updata/' . getSafeFileName($noteId);
+    $content = file_exists($filename) ? file_get_contents($filename) : '';
+    
+    // 如果是AJAX请求，直接返回内容
+    if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && 
+        strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
+        echo $content;
+        exit;
+    }
+}
+
+// 默认显示的内容
+$noteId = isset($_GET['note']) ? $_GET['note'] : 'default';
 $content = '';
-$saveFile = 'updata/notes.txt';
-if (file_exists($saveFile)) {
-    $content = file_get_contents($saveFile);
+$filename = 'updata/' . getSafeFileName($noteId);
+if (file_exists($filename)) {
+    $content = file_get_contents($filename);
 }
 ?>
 
@@ -188,9 +212,60 @@ if (file_exists($saveFile)) {
         .ql-container.ql-snow {
             border: none;
         }
+        #tabs-container {
+            background: #f3f3f3;
+            border-bottom: 1px solid #ccc;
+        }
+        #tabs {
+            display: flex;
+            padding: 5px 5px 0 5px;
+            overflow-x: auto;
+        }
+        #tab-list {
+            display: flex;
+            flex-grow: 1;
+        }
+        .tab {
+            padding: 8px 15px;
+            background: #e3e3e3;
+            border: 1px solid #ccc;
+            border-bottom: none;
+            margin-right: 5px;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+            position: relative;
+            user-select: none;
+        }
+        .tab.active {
+            background: white;
+            margin-bottom: -1px;
+            padding-bottom: 9px;
+        }
+        .tab-close {
+            margin-left: 8px;
+            color: #999;
+            cursor: pointer;
+        }
+        #new-tab {
+            padding: 8px 12px;
+            background: #e3e3e3;
+            border: 1px solid #ccc;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+        }
+        #editor {
+            height: calc(100vh - 85px);
+        }
     </style>
 </head>
 <body>
+    <div id="tabs-container">
+        <div id="tabs">
+            <div id="tab-list"></div>
+            <button id="new-tab">+</button>
+        </div>
+    </div>
     <div id="editor"><?php echo $content; ?></div>
 
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
@@ -325,11 +400,126 @@ if (file_exists($saveFile)) {
         function saveContent() {
             let content = quill.root.innerHTML;
             $.post(window.location.href, {
-                content: content
+                content: content,
+                noteId: tabs.current
             }, function(response) {
                 console.log('内容已保存');
             });
         }
+
+        const tabs = {
+            list: JSON.parse(localStorage.getItem('tabs') || '[]'),
+            current: localStorage.getItem('currentTab') || null,
+
+            init() {
+                if (this.list.length === 0) {
+                    this.createTab();
+                }
+                
+                // 从URL读取指定的笔记
+                const urlParams = new URLSearchParams(window.location.search);
+                const noteId = urlParams.get('note');
+                if (noteId) {
+                    if (!this.list.find(tab => tab.id === noteId)) {
+                        this.list.push({
+                            id: noteId,
+                            name: `笔记 ${noteId.slice(0, 6)}`
+                        });
+                    }
+                    this.current = noteId;
+                }
+
+                this.render();
+                this.bindEvents();
+            },
+
+            createTab() {
+                const id = Math.random().toString(36).substr(2, 9);
+                const name = `笔记 ${id.slice(0, 6)}`;
+                this.list.push({ id, name });
+                this.current = id;
+                this.save();
+                this.render();
+                this.loadContent(id);
+            },
+
+            closeTab(id) {
+                const index = this.list.findIndex(tab => tab.id === id);
+                if (index > -1) {
+                    this.list.splice(index, 1);
+                    if (this.current === id) {
+                        this.current = this.list[Math.max(0, index - 1)]?.id;
+                    }
+                    this.save();
+                    this.render();
+                    if (this.current) {
+                        this.loadContent(this.current);
+                    }
+                }
+            },
+
+            switchTab(id) {
+                this.current = id;
+                this.save();
+                this.render();
+                this.loadContent(id);
+            },
+
+            loadContent(id) {
+                // 更新 URL，使用干净的基础URL
+                const baseUrl = window.location.pathname;
+                const url = new URL(baseUrl, window.location.origin);
+                url.searchParams.set('note', id);
+                window.history.replaceState({}, '', url.toString());
+                
+                $.ajax({
+                    url: baseUrl,  // 使用干净的基础URL
+                    type: 'GET',
+                    data: { note: id },
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    success: function(response) {
+                        quill.setContents([]);
+                        quill.clipboard.dangerouslyPasteHTML(0, response);
+                    }
+                });
+            },
+
+            save() {
+                localStorage.setItem('tabs', JSON.stringify(this.list));
+                localStorage.setItem('currentTab', this.current);
+            },
+
+            render() {
+                const container = document.getElementById('tab-list');
+                container.innerHTML = this.list.map(tab => `
+                    <div class="tab ${tab.id === this.current ? 'active' : ''}" 
+                         data-id="${tab.id}">
+                        ${tab.name}
+                        <span class="tab-close">×</span>
+                    </div>
+                `).join('');
+            },
+
+            bindEvents() {
+                document.getElementById('new-tab').addEventListener('click', () => this.createTab());
+                
+                document.getElementById('tab-list').addEventListener('click', (e) => {
+                    const tab = e.target.closest('.tab');
+                    if (!tab) return;
+                    
+                    if (e.target.classList.contains('tab-close')) {
+                        this.closeTab(tab.dataset.id);
+                    } else {
+                        this.switchTab(tab.dataset.id);
+                    }
+                });
+            }
+        };
+
+        // 初始化选项卡
+        tabs.init();
     </script>
 </body>
 </html>
