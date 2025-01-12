@@ -300,7 +300,7 @@ if (file_exists($filename)) {
                                         processData: false,
                                         contentType: false,
                                         success: function(response) {
-                                            response = JSON.parse(response);
+                                  
                                             if (response.success) {
                                                 const range = quill.getSelection(true);
                                                 quill.insertEmbed(range.index, 'image', response.url);
@@ -360,7 +360,7 @@ if (file_exists($filename)) {
                 processData: false,
                 contentType: false,
                 success: function(response) {
-                    response = JSON.parse(response);
+       
                     if (response.success) {
                         let range = quill.getSelection() || { index: quill.getLength() };
                         const text = `📎 ${response.filename}`;
@@ -381,7 +381,7 @@ if (file_exists($filename)) {
                     image: dataUrl
                 },
                 success: function(response) {
-                    response = JSON.parse(response);
+                   
                     if (response.success) {
                         let range = quill.getSelection() || { index: quill.getLength() };
                         quill.insertEmbed(range.index, 'image', response.url);
